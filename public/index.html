@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PayGen — Pay-per-Call AI Creation (Kite x402)</title>
+<style>
+  :root { --bg:#0d0b14; --card:#171225; --line:#2c2342; --txt:#e8e2f4; --dim:#a294bd; --acc:#a06bff; --ok:#2fbf71; --warn:#ffb347; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--txt); font:14px/1.6 "SF Mono",ui-monospace,Menlo,monospace; padding:20px; }
+  h1 { font-size:20px; } h1 .k { color:var(--acc); }
+  .sub { color:var(--dim); font-size:12px; margin:4px 0 16px; }
+  .cols { display:grid; grid-template-columns:1fr 1.2fr; gap:14px; }
+  @media (max-width:900px){ .cols{grid-template-columns:1fr} }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:14px; }
+  .card h2 { font-size:13px; color:var(--dim); text-transform:uppercase; letter-spacing:1.5px; margin-bottom:10px; display:flex; justify-content:space-between; }
+  .kv { display:grid; grid-template-columns:100px 1fr; gap:2px 10px; font-size:13px; }
+  .kv b { color:var(--dim); font-weight:400; } .mono { word-break:break-all; }
+  input, textarea { width:100%; background:#0e0a18; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit; margin:6px 0; }
+  button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:8px 18px; font:inherit; cursor:pointer; margin-right:8px; }
+  button:disabled { opacity:.4; }
+  button.alt { background:#2c2342; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th,td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:400; }
+  .sim { color:var(--warn); } .badge { font-size:11px; padding:1px 8px; border-radius:10px; border:1px solid var(--warn); color:var(--warn); }
+  #result img { max-width:100%; border-radius:10px; border:1px solid var(--line); margin-top:8px; }
+  .poem { font-size:18px; line-height:2; text-align:center; padding:20px; background:#0e0a18; border-radius:10px; margin-top:8px; }
+  .poem .ft { font-size:11px; color:var(--dim); }
+  #status { font-size:12px; color:var(--dim); min-height:20px; }
+  .price { color:var(--ok); }
+  pre { background:#0e0a18; border-radius:8px; padding:10px; font-size:11px; overflow-x:auto; color:var(--dim); }
+</style>
+</head>
+<body>
+<h1>Pay<span class="k">Gen</span> <span style="font-size:12px;color:var(--dim)">— agent-verified, pay-per-call AI creation · MCP + x402 · Kite</span></h1>
+<p class="sub">左边是"买家 agent"(带 Kite Passport 身份与预算),右边是 PayGen 商户(身份核验 → 扣费 → 生成)| track: Make It Agent-Payable</p>
+
+<div class="cols">
+  <div>
+    <div class="card">
+      <h2>🛒 买家 Agent <span class="badge" id="mode">-</span></h2>
+      <div class="kv">
+        <b>identity</b><span class="mono">quant-research-agent (Kite dev testnet)</span>
+        <b>budget</b><span id="budget" class="price">$2.00</span>
+      </div>
+      <textarea id="prompt" rows="3">A colorful kite flying over Shenzhen skyline at sunset, watercolor style</textarea>
+      <button onclick="buy('generate_image')" id="btnImg">🖼 买一张图 <span class="price">$0.10</span></button>
+      <button class="alt" onclick="buy('generate_poem_card')" id="btnPoem">📜 买一首诗 <span class="price">$0.01</span></button>
+      <div id="status"></div>
+    </div>
+    <div class="card">
+      <h2>接入方式(外部 agent)</h2>
+      <pre>MCP (streamable HTTP):
+POST /paygen/mcp
+{"jsonrpc":"2.0","id":1,"method":"tools/list"}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+  "name":"generate_image",
+  "arguments":{"prompt":"...","_payment":"&lt;base64 x402&gt;"}}}
+
+HTTP x402:
+GET /paygen/api/generate_image?prompt=...
+→ 402 + payment terms (kite-testnet PIEUSD)
+→ retry with X-Payment header</pre>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>🎨 生成结果</h2>
+      <div id="result" style="min-height:80px;color:var(--dim)">尚未购买</div>
+    </div>
+    <div class="card">
+      <h2>🧾 商户流水(身份核验 + 扣费审计)</h2>
+      <table>
+        <thead><tr><th>#</th><th>时间</th><th>工具</th><th>付款方</th><th>金额</th><th>tx</th></tr></thead>
+        <tbody id="ledger"><tr><td colspan="6" style="color:var(--dim)">暂无</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let budget = 2.0;
+async function poll() {
+  const h = await (await fetch("health")).json();
+  $("mode").textContent = h.simPay ? "payment simulated (pending Kite allowlist)" : "x402 live";
+  const l = await (await fetch("ledger")).json();
+  if (l.count) $("ledger").innerHTML = l.ledger.map((r) =>
+    `<tr><td>${r.seq}</td><td>${new Date(r.ts).toLocaleTimeString()}</td><td>${r.tool}</td>` +
+    `<td class="mono">${(r.payer||"-").slice(0,18)}</td><td>$${r.amount}</td>` +
+    `<td class="mono ${r.simulated?"sim":""}">${(r.tx||"-").slice(0,16)}${r.simulated?" ⚠sim":""}</td></tr>`).join("");
+}
+async function buy(tool) {
+  const price = tool === "generate_image" ? 0.10 : 0.01;
+  if (budget < price) { $("status").textContent = "⛔ 预算不足,agent 停止购买"; return; }
+  $("btnImg").disabled = $("btnPoem").disabled = true;
+  $("status").textContent = "① 出示 Passport 身份 → ② 商户核验 → ③ 扣费 $" + price + " → ④ 生成中…(生图约10-60s)";
+  try {
+    const r = await fetch(`api/${tool}`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: $("prompt").value, theme: $("prompt").value }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.status);
+    budget = +(budget - price).toFixed(2); $("budget").textContent = "$" + budget.toFixed(2);
+    $("status").textContent = `✅ 支付 ${d.payment.simulated ? "(simulated)" : ""} tx=${d.payment.tx} · 生成完成`;
+    if (d.result.url) $("result").innerHTML = `<img src="${d.result.url}">`;
+    else $("result").innerHTML = `<div class="poem">${d.result.poem.join("<br>")}<br><span class="ft">${d.result.footer}</span></div>`;
+  } catch (e) { $("status").textContent = "❌ " + e.message; }
+  $("btnImg").disabled = $("btnPoem").disabled = false;
+  poll();
+}
+poll(); setInterval(poll, 4000);
+</script>
+</body>
+</html>

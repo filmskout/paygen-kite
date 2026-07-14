@@ -35,6 +35,8 @@
 <body>
 <h1>Pay<span class="k">Gen</span> <span style="font-size:12px;color:var(--dim)">— agent-verified, pay-per-call AI creation · MCP + x402 · Kite</span></h1>
 <p class="sub">左边是"买家 agent"(带 Kite Passport 身份与预算),右边是 PayGen 商户(身份核验 → 扣费 → 生成)| track: Make It Agent-Payable</p>
+<div style="border-radius:12px;overflow:hidden;border:1px solid var(--line);margin:0 0 14px;position:relative"><img src="hero.jpg" style="width:100%;height:150px;object-fit:cover;display:block;opacity:.85"><span style="position:absolute;right:10px;bottom:8px;font-size:10px;color:#ecf;background:rgba(0,0,0,.5);padding:2px 8px;border-radius:8px">🎨 本图即为 PayGen 真实付费购买的产出 · tx 见流水</span></div>
+
 
 <div class="cols">
   <div>
@@ -85,12 +87,12 @@ const $ = (id) => document.getElementById(id);
 let budget = 2.0;
 async function poll() {
   const h = await (await fetch("health")).json();
-  $("mode").textContent = h.simPay ? "payment simulated (pending Kite allowlist)" : "x402 live";
+  $("mode").textContent = h.simPay ? "payment simulated" : "x402 REAL on-chain (kite-testnet PIEUSD)";
   const l = await (await fetch("ledger")).json();
   if (l.count) $("ledger").innerHTML = l.ledger.map((r) =>
     `<tr><td>${r.seq}</td><td>${new Date(r.ts).toLocaleTimeString()}</td><td>${r.tool}</td>` +
     `<td class="mono">${(r.payer||"-").slice(0,18)}</td><td>$${r.amount}</td>` +
-    `<td class="mono ${r.simulated?"sim":""}">${(r.tx||"-").slice(0,16)}${r.simulated?" ⚠sim":""}</td></tr>`).join("");
+    `<td class="mono ${r.simulated?"sim":""}">${r.explorer ? `<a href="${r.explorer}" target="_blank" style="color:var(--ok)">${(r.tx||"-").slice(0,14)}…</a>` : (r.tx||"-").slice(0,16)}${r.simulated?" ⚠sim":""}</td></tr>`).join("");
 }
 async function buy(tool) {
   const price = tool === "generate_image" ? 0.10 : 0.01;
@@ -98,12 +100,12 @@ async function buy(tool) {
   $("btnImg").disabled = $("btnPoem").disabled = true;
   $("status").textContent = "① 出示 Passport 身份 → ② 商户核验 → ③ 扣费 $" + price + " → ④ 生成中…(生图约10-60s)";
   try {
-    const r = await fetch(`api/${tool}`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: $("prompt").value, theme: $("prompt").value }) });
+    const r = await fetch(`api/demo-buy`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool, prompt: $("prompt").value }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.status);
     budget = +(budget - price).toFixed(2); $("budget").textContent = "$" + budget.toFixed(2);
-    $("status").textContent = `✅ 支付 ${d.payment.simulated ? "(simulated)" : ""} tx=${d.payment.tx} · 生成完成`;
+    $("status").innerHTML = `✅ 链上支付成功 tx=<a href="https://testnet.kitescan.ai/tx/${d.payment.tx}" target="_blank" style="color:var(--ok)">${d.payment.tx.slice(0,18)}…</a> · 生成完成`;
     if (d.result.url) $("result").innerHTML = `<img src="${d.result.url}">`;
     else $("result").innerHTML = `<div class="poem">${d.result.poem.join("<br>")}<br><span class="ft">${d.result.footer}</span></div>`;
   } catch (e) { $("status").textContent = "❌ " + e.message; }

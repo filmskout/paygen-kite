@@ -8,7 +8,7 @@
 
 ## Live demo
 
-**https://ww.storyard.ai:8443/paygen/** — left panel is a "buyer agent" with a budget; right panel shows the merchant ledger. Click 买一张图 → identity check → charge $0.10 → real image generated (gpt-image-2 via apilio).
+**https://ww.storyard.ai:8443/paygen/** — left panel is a "buyer agent" with a budget; right panel shows the merchant ledger. Click 买一张图 → identity check → **real on-chain charge of $0.10 PIEUSD (kite-testnet)** → real image generated (gpt-image-2 via apilio). The hero banner at the top of the page is itself an image purchased through this exact flow.
 
 ## Two integration surfaces
 
@@ -42,15 +42,15 @@ Settlement flow (when live): merchant → Pieverse facilitator `/v2/verify` → 
 | Image generation (apilio gpt-image-2) | ✅ real, every purchase produces a real image |
 | 402 terms / X-Payment / MCP protocol surfaces | ✅ real, protocol-conformant |
 | Facilitator verify/settle code path | ✅ implemented (`SIM_PAY=0`) |
-| On-chain settlement in demo | ⚠️ simulated (`SIM_PAY=1`) — Kite's `kpass agent:session execute` only pays allowlisted merchants; PayGen's allowlisting has been requested. Payer-side signing (EIP-3009) works without allowlist for any x402-capable wallet. |
+| On-chain settlement in demo | ✅ **REAL** (`SIM_PAY=0` in production): buyer signs EIP-3009, merchant settles via Pieverse facilitator on kite-testnet — every purchase is a block-confirmed PIEUSD transfer with a kitescan link |
 | Merchant ledger / audit | ✅ real (in-memory, per-run) |
 
 ## Run
 
 ```bash
 # env: APILIO_API_KEY, APILIO_BASE_URL (image backend); PAY_TO (your wallet)
-SIM_PAY=1 PORT=4030 node server.mjs          # demo mode
-SIM_PAY=0 PORT=4030 node server.mjs          # live x402 settlement via Pieverse
+SIM_PAY=0 PORT=4030 PAY_TO=<merchant addr> node server.mjs   # REAL x402 settlement via Pieverse (production demo)
+SIM_PAY=1 PORT=4030 node server.mjs                          # offline simulated mode
 open http://localhost:4030
 ```
 

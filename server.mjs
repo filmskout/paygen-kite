@@ -37,11 +37,15 @@ const TOOLS = {
 
 const ledger = []; // {ts,seq,tool,payer,amount,tx,simulated,status}
 
-function terms(tool, resource) {
+function terms(tool) {
+  // x402 v2 PaymentRequirements
   const t = TOOLS[tool];
-  return { scheme: "exact", network: NETWORK, maxAmountRequired: t.price, resource, description: t.desc,
-    mimeType: "application/json", payTo: PAY_TO, maxTimeoutSeconds: 240, asset: PIEUSD,
+  return { scheme: "exact", network: NETWORK, asset: PIEUSD, amount: t.price,
+    payTo: PAY_TO, maxTimeoutSeconds: 240,
     extra: { name: "pieUSD", version: "1", merchantName: "PayGen" } };
+}
+function resourceInfo(tool, url) {
+  return { url, description: TOOLS[tool].desc, mimeType: "application/json", serviceName: "PayGen" };
 }
 
 async function facilitate(pathname, payload, requirements) {
@@ -62,14 +66,15 @@ async function settle(tool, xPaymentB64, resource) {
   let payload;
   try { payload = JSON.parse(Buffer.from(xPaymentB64, "base64").toString("utf8")); }
   catch { const e = new Error("invalid X-PAYMENT encoding"); e.code = 400; throw e; }
-  const req2 = terms(tool, resource);
+  const req2 = terms(tool);
   const v = await facilitate("/v2/verify", payload, req2);
   if (!v.ok || v.body.isValid === false) { const e = new Error("verification failed: " + JSON.stringify(v.body).slice(0, 200)); e.code = 402; throw e; }
   const s = await facilitate("/v2/settle", payload, req2);
   if (!s.ok || s.body.success === false) { const e = new Error("settlement failed: " + JSON.stringify(s.body).slice(0, 200)); e.code = 402; throw e; }
   const payer = payload?.payload?.authorization?.from || payload?.from || "unknown";
   const rec = { ts: Date.now(), seq: ledger.length + 1, tool, payer, amount: TOOLS[tool].priceHuman,
-    tx: s.body.transaction || s.body.txHash || null, simulated: false, status: "settled" };
+    tx: s.body.transaction || s.body.txHash || null, simulated: false, status: "settled",
+    explorer: s.body.transaction ? `https://testnet.kitescan.ai/tx/${s.body.transaction}` : null };
   ledger.push(rec); return rec;
 }
 
@@ -142,6 +147,7 @@ const server = http.createServer(async (req, res) => {
     if (existsSync(f)) { res.writeHead(200, { "Content-Type": "image/png" }); return res.end(readFileSync(f)); }
     return send(404, { error: "gone" });
   }
+  if (u.pathname === "/hero.jpg") { res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "public,max-age=86400" }); return res.end(readFileSync(path.join(__dirname, "public", "hero.jpg"))); }
   if (u.pathname === "/health") return send(200, { ok: true, service: "paygen", network: NETWORK, simPay: SIM_PAY, tools: Object.fromEntries(Object.entries(TOOLS).map(([k, v]) => [k, "$" + v.priceHuman])) });
   if (u.pathname === "/ledger") return send(200, { count: ledger.length, ledger });
 
@@ -150,11 +156,22 @@ const server = http.createServer(async (req, res) => {
     catch (e) { return send(400, { error: e.message }); }
   }
 
+  if (u.pathname === "/api/demo-buy" && req.method === "POST") {
+    try {
+      const args = JSON.parse(body || "{}");
+      const tool = args.tool === "generate_image" ? "generate_image" : "generate_poem_card";
+      const { payAndCall } = await import(process.env.BUYER_LIB || "../x402-buyer/buyer.mjs");
+      const r = await payAndCall(`http://127.0.0.1:${PORT}/api/${tool}`, { method: "POST", body: { prompt: args.prompt, theme: args.prompt } });
+      if (!r.paid) return send(402, { error: "buyer payment failed", detail: r.data });
+      return send(200, { ...r.data, buyer: r.payer });
+    } catch (e) { return send(500, { error: e.message }); }
+  }
+
   const m = u.pathname.match(/^\/api\/(generate_image|generate_poem_card)$/);
   if (m) {
     const tool = m[1];
     const xp = req.headers["x-payment"];
-    if (!xp && !SIM_PAY) return send(402, { x402Version: 2, error: "payment required", accepts: [terms(tool, `http://ww.storyard.ai:8443/paygen/api/${tool}`)] });
+    if (!xp && !SIM_PAY) return send(402, { x402Version: 2, error: "payment required", resource: resourceInfo(tool, `https://ww.storyard.ai:8443/paygen/api/${tool}`), accepts: [terms(tool)] });
     try {
       const pay = await settle(tool, xp, `http://ww.storyard.ai:8443/paygen/api/${tool}`);
       const args = body ? JSON.parse(body) : Object.fromEntries(u.searchParams);
@@ -162,7 +179,7 @@ const server = http.createServer(async (req, res) => {
                                             : generatePoemCard(args.theme || "kite");
       return send(200, { payment: { tx: pay.tx, amount: pay.amount, simulated: pay.simulated }, result: out },
         { "X-Payment-Response": Buffer.from(JSON.stringify({ tx: pay.tx })).toString("base64") });
-    } catch (e) { return send(e.code || 500, { error: e.message, ...(e.code === 402 ? { accepts: [terms(tool, u.pathname)] } : {}) }); }
+    } catch (e) { return send(e.code || 500, { error: e.message, ...(e.code === 402 ? { x402Version: 2, resource: resourceInfo(tool, u.pathname), accepts: [terms(tool)] } : {}) }); }
   }
   send(404, { error: "not found" });
 });

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PayGen — Pay-per-Call AI Creation (Kite x402)</title>
 <style>
-  :root { --bg:#0d0b14; --card:#171225; --line:#2c2342; --txt:#e8e2f4; --dim:#a294bd; --acc:#a06bff; --ok:#2fbf71; --warn:#ffb347; }
+  :root { --stripe:linear-gradient(90deg,#a06bff,#ff6bd5); --bg:#0d0b14; --card:#171225; --line:#2c2342; --txt:#e8e2f4; --dim:#a294bd; --acc:#a06bff; --ok:#2fbf71; --warn:#ffb347; }
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--txt); font:14px/1.6 "SF Mono",ui-monospace,Menlo,monospace; padding:20px; }
   h1 { font-size:20px; } h1 .k { color:var(--acc); }
@@ -30,14 +30,37 @@
   #status { font-size:12px; color:var(--dim); min-height:20px; }
   .price { color:var(--ok); }
   pre { background:#0e0a18; border-radius:8px; padding:10px; font-size:11px; overflow-x:auto; color:var(--dim); }
+
+  /* 系列顶部条 + 移动端适配 */
+  .series-stripe { height:4px; border-radius:2px; margin:-20px -20px 14px; background:var(--stripe); }
+  .series-nav { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 12px; }
+  .series-nav a { font-size:11px; padding:3px 10px; border-radius:12px; border:1px solid var(--line); color:var(--dim); text-decoration:none; }
+  .series-nav a.cur { border-color:var(--acc); color:var(--acc); font-weight:700; }
+  img.zoomable { cursor:zoom-in; }
+  #lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,.88); z-index:99; cursor:zoom-out; align-items:center; justify-content:center; }
+  #lightbox.on { display:flex; }
+  #lightbox img { max-width:94vw; max-height:92vh; border-radius:10px; }
+  @media (max-width:700px) {
+    body { padding:10px; font-size:13px; }
+    h1 { font-size:17px; } h1 span:not(.k) { display:block; margin-top:2px; }
+    .kv { grid-template-columns:86px 1fr; font-size:11.5px; }
+    .card { padding:10px 12px; }
+    .card h2 { flex-wrap:wrap; gap:4px; }
+    table { font-size:10.5px; display:block; overflow-x:auto; white-space:nowrap; }
+    .hero-img { height:90px !important; }
+    button { padding:8px 12px; font-size:12.5px; }
+    .series-stripe { margin:-10px -10px 10px; }
+  }
 </style>
 </head>
 <body>
+<div class="series-stripe"></div>
 <h1>Pay<span class="k">Gen</span> <span style="font-size:12px;color:var(--dim)">— agent-verified, pay-per-call AI creation · MCP + x402 · Kite</span></h1>
 <p class="sub">左边是"买家 agent"(带 Kite Passport 身份与预算),右边是 PayGen 商户(身份核验 → 扣费 → 生成)| track: Make It Agent-Payable</p>
-<div style="border-radius:12px;overflow:hidden;border:1px solid var(--line);margin:0 0 14px;position:relative"><img src="hero.jpg" style="width:100%;height:150px;object-fit:cover;display:block;opacity:.85"><span style="position:absolute;right:10px;bottom:8px;font-size:10px;color:#ecf;background:rgba(0,0,0,.5);padding:2px 8px;border-radius:8px">🎨 本图即为 PayGen 真实付费购买的产出 · tx 见流水</span></div>
+<div style="border-radius:12px;overflow:hidden;border:1px solid var(--line);margin:0 0 14px;position:relative"><img src="hero.jpg" class="zoomable hero-img" style="width:100%;height:150px;object-fit:cover;display:block;opacity:.85"><span style="position:absolute;right:10px;bottom:8px;font-size:10px;color:#ecf;background:rgba(0,0,0,.5);padding:2px 8px;border-radius:8px">🎨 本图即为 PayGen 真实付费购买的产出 · tx 见流水</span></div>
 
 
+<div class="series-nav"><a href="../quantscout/" class="">① QuantScout·买家</a><a href="../paygen/" class="cur">② PayGen·商户</a><a href="../agentledger/" class="">③ AgentLedger·所有者</a></div>
 <div class="cols">
   <div>
     <div class="card">
@@ -47,9 +70,12 @@
         <b>budget</b><span id="budget" class="price">$2.00</span>
       </div>
       <textarea id="prompt" rows="3">A colorful kite flying over Shenzhen skyline at sunset, watercolor style</textarea>
-      <button onclick="buy('generate_image')" id="btnImg">🖼 买一张图 <span class="price">$0.10</span></button>
-      <button class="alt" onclick="buy('generate_poem_card')" id="btnPoem">📜 买一首诗 <span class="price">$0.01</span></button>
+      <button onclick="buy('generate_image')" id="btnImg">🖼 买一张图 <span class="price" id="pImg">$0.10</span><span id="tImg"></span></button>
+      <button class="alt" onclick="buy('generate_poem_card')" id="btnPoem">📜 买一首诗 <span class="price" id="pPoem">$0.01</span><span id="tPoem"></span></button>
       <div id="status"></div>
+      <div style="margin-top:8px;padding:8px 10px;background:#0e0a18;border-radius:8px;font-size:11px;color:var(--dim)" id="pricing">
+        📊 实时定价加载中…
+      </div>
     </div>
     <div class="card">
       <h2>接入方式(外部 agent)</h2>
@@ -88,6 +114,13 @@ let budget = 2.0;
 async function poll() {
   const h = await (await fetch("health")).json();
   $("mode").textContent = h.simPay ? "payment simulated" : "x402 REAL on-chain (kite-testnet PIEUSD)";
+  if (h.pricing) {
+    const pi = h.pricing.generate_image, pp = h.pricing.generate_poem_card;
+    const arrow = (t) => t === "up" ? " ↑" : t === "down" ? " ↓" : "";
+    $("pImg").textContent = "$" + pi.price; $("tImg").textContent = arrow(pi.trend);
+    $("pPoem").textContent = "$" + pp.price; $("tPoem").textContent = arrow(pp.trend);
+    $("pricing").innerHTML = `📊 <b style="color:var(--txt)">实时定价</b> — 交易量驱动浮动:近10分钟成交 图×${pi.demand10m} 诗×${pp.demand10m},1小时 ×${pi.vol1h}/${pp.vol1h} · 需求系数 ${pi.demand} · 冷却 ${pi.cooling} · 时段 ${pi.timeFactor} · 趋势 ${pi.trend==="up"?"📈 走高":pi.trend==="down"?"📉 回落":"— 平稳"}<br>基准: 图 $${0.10} 诗 $${0.01} · 区间: 图 $0.05–0.30 诗 $0.005–0.05 · 每笔成交按下单时刻现价结算`;
+  }
   const l = await (await fetch("ledger")).json();
   if (l.count) $("ledger").innerHTML = l.ledger.map((r) =>
     `<tr><td>${r.seq}</td><td>${new Date(r.ts).toLocaleTimeString()}</td><td>${r.tool}</td>` +
@@ -95,7 +128,7 @@ async function poll() {
     `<td class="mono ${r.simulated?"sim":""}">${r.explorer ? `<a href="${r.explorer}" target="_blank" style="color:var(--ok)">${(r.tx||"-").slice(0,14)}…</a>` : (r.tx||"-").slice(0,16)}${r.simulated?" ⚠sim":""}</td></tr>`).join("");
 }
 async function buy(tool) {
-  const price = tool === "generate_image" ? 0.10 : 0.01;
+  const price = parseFloat((tool === "generate_image" ? $("pImg") : $("pPoem")).textContent.slice(1)) || (tool === "generate_image" ? 0.10 : 0.01);
   if (budget < price) { $("status").textContent = "⛔ 预算不足,agent 停止购买"; return; }
   $("btnImg").disabled = $("btnPoem").disabled = true;
   $("status").textContent = "① 出示 Passport 身份 → ② 商户核验 → ③ 扣费 $" + price + " → ④ 生成中…(生图约10-60s)";
@@ -104,15 +137,21 @@ async function buy(tool) {
       body: JSON.stringify({ tool, prompt: $("prompt").value }) });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || r.status);
-    budget = +(budget - price).toFixed(2); $("budget").textContent = "$" + budget.toFixed(2);
+    const actually = parseFloat(d.paidAmount || price);
+    budget = +(budget - actually).toFixed(4); $("budget").textContent = "$" + budget.toFixed(2);
     $("status").innerHTML = `✅ 链上支付成功 tx=<a href="https://testnet.kitescan.ai/tx/${d.payment.tx}" target="_blank" style="color:var(--ok)">${d.payment.tx.slice(0,18)}…</a> · 生成完成`;
-    if (d.result.url) $("result").innerHTML = `<img src="${d.result.url}">`;
+    if (d.result.url) $("result").innerHTML = `<img src="${d.result.url}" class="zoomable">`;
     else $("result").innerHTML = `<div class="poem">${d.result.poem.join("<br>")}<br><span class="ft">${d.result.footer}</span></div>`;
   } catch (e) { $("status").textContent = "❌ " + e.message; }
   $("btnImg").disabled = $("btnPoem").disabled = false;
   poll();
 }
 poll(); setInterval(poll, 4000);
+</script>
+<div id="lightbox" onclick="this.classList.remove('on')"><img id="lbimg" src=""></div>
+<script>
+function lb(src){document.getElementById('lbimg').src=src;document.getElementById('lightbox').classList.add('on');}
+document.addEventListener('click',(e)=>{const t=e.target;if(t.tagName==='IMG'&&t.classList.contains('zoomable')&&!t.closest('#lightbox')){lb(t.src);}});
 </script>
 </body>
 </html>
